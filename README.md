@@ -1,3 +1,1 @@
-dd
-# uncover-the-smoking-gun
-# uncover-the-smoking-gun
+ai와 대화하며 단서를 찾는 추리게임
