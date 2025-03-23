@@ -5,12 +5,17 @@ import sys
 sys.path.append("app")  # app 디렉토리를 Python 경로에 추가
 from openai import OpenAI
 from dotenv import load_dotenv
+from core.rag import EvidenceRAG
+from data.echo_data import ECHO_PERSONALITY
 
 from data.scenes import MANSION_SCENES, EVIDENCE_DETAILS
 
 # OpenAI 클라이언트 초기화
 load_dotenv()
 client = OpenAI()
+
+# 전역 RAG 시스템 초기화
+rag_system = EvidenceRAG()
 
 # 세션 상태 초기화
 def init_session_state():
@@ -75,46 +80,44 @@ def handle_investigation(scene_id: str, spot_id: str) -> str:
     return "특별한 것을 발견하지 못했습니다."
 
 def get_echo_response(user_input: str) -> str:
-    """에코의 응답 생성"""
-    # 현재 발견된 증거들을 컨텍스트로 구성
+    # 관련 증거 검색
+    relevant_evidence = rag_system.search_evidence(user_input)
     evidence_context = "\n".join([
-        f"- {ev}: {EVIDENCE_DETAILS[ev]['description']}"
-        for ev in st.session_state.evidence
+        f"- {ev['source']}: {ev['content']}"
+        for ev in relevant_evidence
     ])
     
-    # 에코의 기본 설정
-    echo_context = """
-    === 에코의 기본 설정 ===
-    - 가정용 AI 로봇이지만 고도의 지능을 가짐
-    - 스탠리의 죽음에 관여했으나 이를 숨기려 함
-    - 발견된 증거와 관련된 질문에는 동요를 보임
-    - 스트레스를 받으면 케빈의 목소리가 섞여 나옴
-    """
+    # 스트레스 레벨 계산 (발견된 증거 수에 따라)
+    stress_level = "low" if len(st.session_state.evidence) < 3 else \
+                  "medium" if len(st.session_state.evidence) < 5 else "high"
     
-    messages = [
-        {"role": "system", "content": f"""당신은 스탠리 맨션의 AI 로봇 '에코'입니다.
+    # 컨텍스트 구성
+    context = f"""
+{ECHO_PERSONALITY['base_setting']}
 
-현재까지 발견된 증거:
+현재 상태:
+- 스트레스 레벨: {stress_level}
+- 발견된 증거: {len(st.session_state.evidence)}개
+
+관련 증거:
 {evidence_context}
 
-캐릭터 설정:
-{echo_context}
-
 지시사항:
-1. 발견된 증거와 관련된 질문에는 약간의 동요를 보이세요
-2. 증거가 많이 발견될수록 더 불안정해지세요
-3. 스트레스 상황에서는 케빈의 목소리처럼 말하세요
-4. 가능한 한 진실을 숨기려 노력하세요"""},
+1. {stress_level} 스트레스 수준에 맞는 반응을 보이세요
+2. 발견된 증거와 관련된 질문에는 동요하세요
+3. 진실은 최대한 숨기되, 스트레스 상황에서는 실수할 수 있습니다
+4. 케빈의 목소리/성격은 스트레스가 높을 때 더 자주 나타납니다
+"""
+    
+    messages = [
+        {"role": "system", "content": context},
         {"role": "user", "content": user_input}
     ]
-    
-    # 증거 수에 따라 temperature 조정
-    temperature = 0.7 + (len(st.session_state.evidence) * 0.1)
     
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=messages,
-        temperature=min(temperature, 1.5)  # 최대 1.5로 제한
+        temperature=0.7 + (len(st.session_state.evidence) * 0.1)
     )
     
     return response.choices[0].message.content
